@@ -20,11 +20,16 @@ public:
 
   ~ThreadPool() {
     {
-      std::unique_lock<std::mutex> poolMutex(threadPoolPtr->poolMutex);
+      std::unique_lock<std::mutex> lockPoolMutex(threadPoolPtr->poolMutex);
       threadPoolPtr->closed = true;
     }
     threadPoolPtr->conditionVariable.notify_all();
   }
+
+  ThreadPool(const ThreadPool&) = delete;
+  ThreadPool(ThreadPool&&) = delete;
+  ThreadPool& operator= (const ThreadPool&) = delete;
+  ThreadPool& operator= (ThreadPool&&) = delete;
 
   template<typename F, typename... Args>
   auto submitTask(F&& f, Args&&... args) -> std::future<decltype(std::forward<F>(f)(std::forward<Args>(args)...))> {
@@ -35,7 +40,7 @@ public:
       (*funcPtr)();
     };
     {
-      std::unique_lock<std::mutex> poolMutex(threadPoolPtr->poolMutex);
+      std::unique_lock<std::mutex> lockPoolMutex(threadPoolPtr->poolMutex);
       threadPoolPtr->taskQueue.emplace(wrappedFunction);
     }
     threadPoolPtr->conditionVariable.notify_one();
@@ -58,18 +63,18 @@ protected:
     
     void operator() () {
       std::function<void()> f;
-      std::unique_lock<std::mutex> poolMutex(pool->poolMutex);
+      std::unique_lock<std::mutex> lockPoolMutex(pool->poolMutex);
       while (true) {
         if (!pool->taskQueue.empty()) {
           f = std::move(pool->taskQueue.front());
           pool->taskQueue.pop();
-          poolMutex.unlock();
+          lockPoolMutex.unlock();
           f();
-          poolMutex.lock();
+          lockPoolMutex.lock();
         } else if (pool->closed) {
           break;
         } else {
-          pool->conditionVariable.wait(poolMutex);
+          pool->conditionVariable.wait(lockPoolMutex);
         }
       }
     }
